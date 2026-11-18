@@ -1,28 +1,68 @@
-"""news-image-20261118 entry: copy the bundled image to the output path.
+"""Publish the finished front page for the make.fun grader.
 
-The image is a newspaper front page for Wednesday 18 November 2026, drawn
-once with PIL (see build_image.py) and stored in this repository as
-entry.png ("THE WORLD" — Crimea bridge lead, Iran/Bahrain, Trump in
-Manila, Hormuz tanker, Knesset speaker, Cyclone Akvan, Dhoni, plus a
-ticker). This program does nothing but copy those exact bytes to
-/output/entry.png (or $MAKEFUN_OUTPUT_DIR/entry.png when that variable
-is set), so the two grader runs always write identical bytes.
+The artwork itself is already complete: it sits next to this script as
+``entry.png``.  All this runner does is place that file where the harness
+expects the deliverable, byte for byte, so the two grading passes observe
+the same picture.
 
-Standard library only, no network, no randomness.
+Behaviour
+----------
+* The destination folder comes from ``MAKEFUN_OUTPUT_DIR`` when that
+  variable is set; otherwise ``/output`` is used.
+* The picture is streamed in blocks, so memory stays flat no matter the
+  file size, and a SHA-256 digest is taken on the fly as a sanity check.
+* Nothing is fetched, nothing is generated, nothing varies between runs:
+  the same input always yields the same output file.
 """
 
+from __future__ import annotations
+
+import hashlib
 import os
-import shutil
+import sys
 from pathlib import Path
 
+PICTURE_NAME = "entry.png"
+FALLBACK_FOLDER = "/output"
+BLOCK_SIZE = 1 << 16
 
-def main() -> None:
-    here = Path(__file__).resolve().parent
-    source = here / "entry.png"
-    output_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    output_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, output_dir / "entry.png")
+
+def here() -> Path:
+    """Folder holding this script (and therefore the picture)."""
+    return Path(__file__).resolve().parent
+
+
+def destination_folder() -> Path:
+    """Where the grader wants the deliverable, per the environment."""
+    raw = os.environ.get("MAKEFUN_OUTPUT_DIR", "").strip()
+    return Path(raw) if raw else Path(FALLBACK_FOLDER)
+
+
+def stream_picture(source: Path, target: Path) -> str:
+    """Copy ``source`` onto ``target`` in blocks, returning the digest."""
+    digester = hashlib.sha256()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as reader, target.open("wb") as writer:
+        while True:
+            block = reader.read(BLOCK_SIZE)
+            if not block:
+                break
+            digester.update(block)
+            writer.write(block)
+    return digester.hexdigest()
+
+
+def main(argv: list[str] | None = None) -> int:
+    _ = argv  # no command-line options; the environment decides the target
+    picture = here() / PICTURE_NAME
+    if not picture.is_file():
+        print(f"missing bundled picture: {picture}", file=sys.stderr)
+        return 1
+    target = destination_folder() / PICTURE_NAME
+    digest = stream_picture(picture, target)
+    print(f"wrote {target} ({target.stat().st_size} bytes, sha256 {digest})")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
